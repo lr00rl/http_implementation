@@ -4,6 +4,11 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
+#include <openssl/ec.h>
+#include <openssl/ecdh.h>
+#include <openssl/obj_mac.h>
+#include <openssl/bn.h>
+#include <openssl/err.h>
 
 // ============================================================================
 // SHA-256 实现
@@ -207,7 +212,7 @@ static void p_hash(const uint8_t *secret, size_t secret_len,
                    const uint8_t *seed, size_t seed_len,
                    uint8_t *output, size_t output_len) {
     uint8_t a[32];  // A(i)
-    uint8_t temp[64];
+    uint8_t temp[128];  // Increased size to accommodate A(i) + seed (32 + max_seed_len)
     size_t copied = 0;
 
     // A(1) = HMAC(secret, seed)
@@ -713,6 +718,74 @@ void tls_random_bytes(uint8_t *output, size_t len) {
     for (i = 0; i < len; i++) {
         output[i] = rand() & 0xFF;
     }
+}
+
+// ============================================================================
+// ECDHE (Elliptic Curve Diffie-Hellman Ephemeral) 密钥交换
+// ============================================================================
+
+int ecdhe_compute_shared_secret(const uint8_t *server_public_key,
+                                 uint8_t *shared_secret,
+                                 uint8_t *client_public_key) {
+    EC_KEY *ec_key = NULL;
+    EC_POINT *server_point = NULL;
+    const EC_GROUP *group = NULL;
+    int ret = -1;
+
+    // 创建 EC_KEY 对象，使用 P-256 曲线 (secp256r1)
+    ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    if (!ec_key) {
+        fprintf(stderr, "Failed to create EC_KEY\n");
+        goto cleanup;
+    }
+
+    // 生成客户端的密钥对
+    if (EC_KEY_generate_key(ec_key) != 1) {
+        fprintf(stderr, "Failed to generate EC key pair\n");
+        goto cleanup;
+    }
+
+    group = EC_KEY_get0_group(ec_key);
+
+    // 导出客户端公钥 (未压缩格式，65 字节)
+    const EC_POINT *client_point = EC_KEY_get0_public_key(ec_key);
+    if (EC_POINT_point2oct(group, client_point, POINT_CONVERSION_UNCOMPRESSED,
+                           client_public_key, 65, NULL) != 65) {
+        fprintf(stderr, "Failed to export client public key\n");
+        goto cleanup;
+    }
+
+    // 解析服务器公钥
+    server_point = EC_POINT_new(group);
+    if (!server_point) {
+        fprintf(stderr, "Failed to create EC_POINT\n");
+        goto cleanup;
+    }
+
+    if (EC_POINT_oct2point(group, server_point, server_public_key, 65, NULL) != 1) {
+        fprintf(stderr, "Failed to parse server public key\n");
+        goto cleanup;
+    }
+
+    // 计算共享密钥 (ECDH)
+    // shared_secret = client_private_key * server_public_key
+    uint8_t shared_point[65];
+    int shared_len = ECDH_compute_key(shared_point, sizeof(shared_point),
+                                      server_point, ec_key, NULL);
+    if (shared_len <= 0) {
+        fprintf(stderr, "Failed to compute ECDH shared secret\n");
+        goto cleanup;
+    }
+
+    // 对于 P-256，共享密钥是 32 字节的 x 坐标
+    memcpy(shared_secret, shared_point, 32);
+    ret = 0;
+
+cleanup:
+    if (server_point) EC_POINT_free(server_point);
+    if (ec_key) EC_KEY_free(ec_key);
+
+    return ret;
 }
 
 // ============================================================================

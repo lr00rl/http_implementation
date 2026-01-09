@@ -2,7 +2,7 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -g -O2
-LDFLAGS =
+LDFLAGS = -lssl -lcrypto
 
 # 源文件
 SOURCES = client.c tls_crypto.c tls_record.c tls_handshake.c tls_session.c

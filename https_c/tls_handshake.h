@@ -47,9 +47,10 @@ int tls_receive_finished(tls_session_t *session);
 // ============================================================================
 
 // 从预主密钥派生主密钥
-// pre_master_secret: 预主密钥 (48 字节)
+// pre_master_secret: 预主密钥
+// secret_len: 预主密钥长度 (RSA: 48字节, ECDHE: 32字节)
 // session: TLS 会话
-void tls_derive_master_secret(const uint8_t *pre_master_secret, tls_session_t *session);
+void tls_derive_master_secret(const uint8_t *pre_master_secret, size_t secret_len, tls_session_t *session);
 
 // 从主密钥派生密钥材料
 void tls_derive_keys(tls_session_t *session);

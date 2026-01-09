@@ -382,7 +382,12 @@ void tls_compute_verify_data(tls_session_t *session, const char *label, uint8_t 
     uint8_t handshake_hash[32];
     sha256(session->handshake_messages, session->handshake_messages_len, handshake_hash);
 
+    printf("[DEBUG] Computing verify_data for '%s'\n", label);
+    printf("[DEBUG] Handshake messages length: %zu bytes\n", session->handshake_messages_len);
+    print_hex("[DEBUG] Handshake hash", handshake_hash, 32);
+
     tls_prf_sha256(session->master_secret, 48, label, handshake_hash, 32, output, 12);
+    print_hex("[DEBUG] Verify data", output, 12);
 }
 
 int tls_send_finished(tls_session_t *session) {
@@ -418,8 +423,16 @@ int tls_receive_finished(tls_session_t *session) {
     // 首先接收 ChangeCipherSpec
     printf("[TLS] Waiting for server ChangeCipherSpec...\n");
     int len = tls_receive_record(session, &content_type, buffer, sizeof(buffer));
-    if (len < 0 || content_type != TLS_CONTENT_CHANGE_CIPHER_SPEC) {
-        fprintf(stderr, "Expected ChangeCipherSpec\n");
+    if (len < 0) {
+        fprintf(stderr, "Failed to receive record (len=%d)\n", len);
+        return -1;
+    }
+    if (content_type != TLS_CONTENT_CHANGE_CIPHER_SPEC) {
+        fprintf(stderr, "Expected ChangeCipherSpec (0x14), got content_type=0x%02x, len=%d\n",
+                content_type, len);
+        if (content_type == TLS_CONTENT_ALERT && len >= 2) {
+            fprintf(stderr, "Alert: level=%d, description=%d\n", buffer[0], buffer[1]);
+        }
         return -1;
     }
 
@@ -462,14 +475,14 @@ int tls_receive_finished(tls_session_t *session) {
 // 密钥派生
 // ============================================================================
 
-void tls_derive_master_secret(const uint8_t *pre_master_secret, tls_session_t *session) {
+void tls_derive_master_secret(const uint8_t *pre_master_secret, size_t secret_len, tls_session_t *session) {
     // master_secret = PRF(pre_master_secret, "master secret",
     //                     ClientHello.random + ServerHello.random)[0..47]
     uint8_t seed[64];
     memcpy(seed, session->client_random, 32);
     memcpy(seed + 32, session->server_random, 32);
 
-    tls_prf_sha256(pre_master_secret, 48, "master secret", seed, 64,
+    tls_prf_sha256(pre_master_secret, secret_len, "master secret", seed, 64,
                    session->master_secret, 48);
 
     printf("[TLS] Master secret derived\n");
@@ -538,23 +551,24 @@ int tls_handshake(tls_session_t *session, const char *hostname) {
         return -1;
     }
 
-    // 6. 生成预主密钥
-    // 注意：这里使用简化的实现，实际应该使用 ECDHE
-    uint8_t pre_master_secret[48];
-    pre_master_secret[0] = (TLS_VERSION_1_2 >> 8) & 0xFF;
-    pre_master_secret[1] = TLS_VERSION_1_2 & 0xFF;
-    tls_random_bytes(pre_master_secret + 2, 46);
+    // 6. 使用 ECDHE 计算共享密钥
+    uint8_t client_public_key[65];
+    uint8_t shared_secret[32];
+
+    printf("[TLS] Computing ECDHE shared secret...\n");
+    if (ecdhe_compute_shared_secret(server_public_key, shared_secret, client_public_key) < 0) {
+        fprintf(stderr, "Failed to compute ECDHE shared secret\n");
+        return -1;
+    }
 
     // 7. 派生主密钥
-    tls_derive_master_secret(pre_master_secret, session);
+    // 在 ECDHE 中，预主密钥就是共享密钥（32 字节）
+    tls_derive_master_secret(shared_secret, 32, session);
 
     // 8. 派生会话密钥
     tls_derive_keys(session);
 
     // 9. 发送 ClientKeyExchange
-    uint8_t client_public_key[65];
-    client_public_key[0] = 0x04;  // 未压缩点
-    tls_random_bytes(client_public_key + 1, 64);
     if (tls_send_client_key_exchange(session, client_public_key) < 0) {
         return -1;
     }

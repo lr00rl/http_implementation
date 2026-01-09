@@ -48,7 +48,7 @@ int tls_send_record(tls_session_t *session, uint8_t content_type,
     uint8_t *record_data;
     size_t record_len;
 
-    if (session->encryption_enabled && content_type == TLS_CONTENT_APPLICATION_DATA) {
+    if (session->encryption_enabled) {
         // 加密模式：使用 AES-128-GCM
         // GCM nonce = client_write_iv (4 字节) || 序列号 (8 字节)
         uint8_t nonce[12];
@@ -143,7 +143,7 @@ int tls_receive_record(tls_session_t *session, uint8_t *content_type,
 
     size_t plaintext_len;
 
-    if (session->encryption_enabled && *content_type == TLS_CONTENT_APPLICATION_DATA) {
+    if (session->encryption_enabled && *content_type != TLS_CONTENT_CHANGE_CIPHER_SPEC && *content_type != TLS_CONTENT_ALERT) {
         // 解密模式
         if (length < 24) {  // 至少需要 8 字节 nonce + 16 字节 tag
             fprintf(stderr, "Encrypted record too short\n");

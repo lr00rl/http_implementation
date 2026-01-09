@@ -116,6 +116,19 @@ int aes128_gcm_decrypt(aes128_gcm_ctx_t *ctx,
                        uint8_t *plaintext);
 
 // ============================================================================
+// ECDHE (Elliptic Curve Diffie-Hellman Ephemeral) 密钥交换
+// ============================================================================
+
+// 计算 ECDHE 共享密钥
+// server_public_key: 服务器的公钥 (65 字节，未压缩格式)
+// shared_secret: 输出的共享密钥 (32 字节)
+// client_public_key: 输出客户端的公钥 (65 字节，未压缩格式)
+// 返回 0 表示成功，-1 表示失败
+int ecdhe_compute_shared_secret(const uint8_t *server_public_key,
+                                 uint8_t *shared_secret,
+                                 uint8_t *client_public_key);
+
+// ============================================================================
 // 随机数生成
 // ============================================================================
 
