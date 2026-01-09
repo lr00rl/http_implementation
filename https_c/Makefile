@@ -11,23 +11,33 @@ TARGET = https_client
 
 # 服务器程序
 SERVER_TARGET = https_server
-SERVER_SOURCES = server.c
+SERVER_SOURCES = server.c tls_crypto.c tls_record.c tls_handshake.c tls_session.c tls_server_handshake.c
+SERVER_OBJECTS = $(SERVER_SOURCES:.c=.o)
 
-all: $(TARGET) $(SERVER_TARGET)
+# 测试客户端程序
+TEST_CLIENT_TARGET = test_client
+TEST_CLIENT_SOURCES = test_client.c tls_crypto.c tls_record.c tls_handshake.c tls_session.c
+TEST_CLIENT_OBJECTS = $(TEST_CLIENT_SOURCES:.c=.o)
+
+all: $(TARGET) $(SERVER_TARGET) $(TEST_CLIENT_TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "✓ HTTPS client built successfully!"
 
-$(SERVER_TARGET): $(SERVER_SOURCES)
+$(SERVER_TARGET): $(SERVER_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "✓ HTTPS server built successfully!"
+
+$(TEST_CLIENT_TARGET): $(TEST_CLIENT_OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "✓ Test client built successfully!"
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJECTS) $(TARGET) $(SERVER_TARGET)
+	rm -f $(OBJECTS) $(SERVER_OBJECTS) $(TEST_CLIENT_OBJECTS) $(TARGET) $(SERVER_TARGET) $(TEST_CLIENT_TARGET)
 	@echo "✓ Cleaned build files"
 
 run: $(TARGET)
@@ -35,6 +45,9 @@ run: $(TARGET)
 
 run-server: $(SERVER_TARGET)
 	./$(SERVER_TARGET)
+
+run-test: $(TEST_CLIENT_TARGET)
+	./$(TEST_CLIENT_TARGET)
 
 # 调试模式
 debug: CFLAGS += -DDEBUG -g3
