@@ -2,35 +2,54 @@
 package main
 
 import (
-    "fmt"
-    "net"
+	"bytes"
+	"fmt"
+	"io"
+	"net"
 )
 
 func main() {
-    listener, _ := net.Listen("tcp", ":8080")
-    defer listener.Close()
+	listener, _ := net.Listen("tcp", ":8080")
+	defer listener.Close()
 
-    fmt.Println("Server listening on port 8080")
+	fmt.Println("Server listening on port 8080")
 
-    for {
-        conn, _ := listener.Accept()
-        go handleConnection(conn)
-    }
+	for {
+		conn, _ := listener.Accept()
+		go handleConnection(conn)
+	}
 }
 
 func handleConnection(conn net.Conn) {
-    defer conn.Close()
+	defer conn.Close()
 
-    buffer := make([]byte, 4096)
-    conn.Read(buffer)
-	// print request:
+	var requestBuffer bytes.Buffer
+	tempBuffer := make([]byte, 1024) // Read in 1KB chunks
 
+	for {
+		n, err := conn.Read(tempBuffer)
+		if err != nil {
+			if err != io.EOF {
+				fmt.Println("Read error:", err)
+			}
+			break
+		}
 
-    response := "HTTP/1.1 200 OK\r\n" +
-                "Content-Type: text/plain\r\n" +
-                "Content-Length: 13\r\n" +
-                "\r\n" +
-                "Hello, World!"
+		requestBuffer.Write(tempBuffer[:n])
 
-    conn.Write([]byte(response))
+		// Check if we've received the end of the headers
+		if bytes.Contains(requestBuffer.Bytes(), []byte("\r\n\r\n")) {
+			break
+		}
+	}
+
+	fmt.Printf("Received request:\n%s\n", requestBuffer.String())
+
+	response := "HTTP/1.1 200 OK\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: 13\r\n" +
+		"\r\n" +
+		"Hello, World!"
+
+	conn.Write([]byte(response))
 }

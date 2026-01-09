@@ -19,5 +19,5 @@ func main() {
 
     buffer := make([]byte, 4096)
     n, _ := conn.Read(buffer)
-    fmt.Println(string(buffer[:n]))
+    fmt.Printf("Received response:\n%s\n", string(buffer[:n]))
 }
