@@ -14,8 +14,8 @@ int main() {
     struct sockaddr_in server_addr;
 
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(80);
-    inet_pton(AF_INET, "54.80.48.62", &server_addr.sin_addr);
+    server_addr.sin_port = htons(8080);
+    inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
 
     if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
         perror("connect");
@@ -23,8 +23,8 @@ int main() {
     }
 
     const char *request =
-        "GET /uuid HTTP/1.1\r\n"
-        "Host: httpbin.org\r\n"
+        "GET / HTTP/1.1\r\n"
+        "Host: localhost\r\n"
         "Connection: close\r\n"
         "\r\n";
 

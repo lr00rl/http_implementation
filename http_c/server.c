@@ -12,7 +12,8 @@ int main() {
     int server_fd, client_fd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t addr_len = sizeof(client_addr);
-    char buffer[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE + 1];
+    memset(buffer, 0, BUFFER_SIZE);
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     int opt = 1;
@@ -29,7 +30,34 @@ int main() {
 
     while(1) {
         client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addr_len);
-        read(client_fd, buffer, BUFFER_SIZE);
+        char buffer[BUFFER_SIZE] = {0};
+        int total_bytes_received = 0;
+        int bytes_received;
+
+        // Read until we find the end of headers (\r\n\r\n) or the buffer is (almost) full
+        while ((bytes_received = read(client_fd, buffer + total_bytes_received, BUFFER_SIZE - total_bytes_received - 1)) > 0) {
+            total_bytes_received += bytes_received;
+            buffer[total_bytes_received] = '\0'; // Null-terminate for strstr
+            // Check if we've received the end of the headers
+            if (strstr(buffer, "\r\n\r\n") != NULL) {
+                break;
+            }
+            // Break if the buffer is full but we still haven't found the end of headers
+            if (total_bytes_received >= BUFFER_SIZE - 1) {
+                // Buffer is full, but we haven't found the end of headers.
+                // This could be treated as an error (e.g., 413 Payload Too Large).
+                // For simplicity, we'll just break.
+                break;
+            }
+        }
+        
+        if (bytes_received < 0) {
+            perror("read");
+            close(client_fd);
+            continue;
+        }
+
+        printf("Received request:\n%s\n", buffer);
 
         const char *response =
             "HTTP/1.1 200 OK\r\n"
