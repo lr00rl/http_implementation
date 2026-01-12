@@ -1,38 +1,43 @@
-// tls_record.h - TLS 记录层协议
 #ifndef TLS_RECORD_H
 #define TLS_RECORD_H
 
-#include "tls_types.h"
+#include <stdint.h>
+#include <stddef.h>
 
-// ============================================================================
-// TLS 记录层函数
-// ============================================================================
+// TLS Content Types
+#define TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC 20
+#define TLS_CONTENT_TYPE_ALERT              21
+#define TLS_CONTENT_TYPE_HANDSHAKE          22
+#define TLS_CONTENT_TYPE_APPLICATION_DATA   23
 
-// 发送 TLS 记录
-// session: TLS 会话
-// content_type: 内容类型
-// data: 要发送的数据
-// data_len: 数据长度
-// 返回发送的字节数，失败返回 -1
-int tls_send_record(tls_session_t *session, uint8_t content_type,
-                    const uint8_t *data, size_t data_len);
+// TLS Versions
+#define TLS_VERSION_1_2  0x0303
+#define TLS_VERSION_1_3  0x0304
 
-// 接收 TLS 记录
-// session: TLS 会话
-// content_type: 期望的内容类型 (如果为 0 则接受任何类型)
-// buffer: 接收缓冲区
-// buffer_size: 缓冲区大小
-// 返回接收的数据长度，失败返回 -1
-int tls_receive_record(tls_session_t *session, uint8_t *content_type,
-                       uint8_t *buffer, size_t buffer_size);
+// TLS Record header
+typedef struct {
+    uint8_t content_type;
+    uint16_t version;
+    uint16_t length;
+} __attribute__((packed)) tls_record_header_t;
 
-// 发送加密的应用数据
-int tls_send_application_data(tls_session_t *session,
-                               const uint8_t *data, size_t data_len);
+typedef struct {
+    uint8_t write_key[32];
+    uint8_t write_iv[12];
+    uint8_t read_key[32];
+    uint8_t read_iv[12];
+    uint64_t write_seq;
+    uint64_t read_seq;
+    int cipher_suite;
+    int encrypted;
+} tls_record_state_t;
 
-// 接收加密的应用数据
-int tls_receive_application_data(tls_session_t *session,
-                                  uint8_t *buffer, size_t buffer_size);
+void tls_record_init(tls_record_state_t *state);
 
-#endif // TLS_RECORD_H
+int tls_record_send(int sock, tls_record_state_t *state,
+                    uint8_t content_type, const uint8_t *data, size_t len);
 
+int tls_record_recv(int sock, tls_record_state_t *state,
+                    uint8_t *content_type, uint8_t *data, size_t max_len);
+
+#endif
