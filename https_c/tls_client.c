@@ -1,6 +1,46 @@
 #include "tls_client.h"
 #include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <openssl/x509.h> // For X509 certificate handling
+#include <openssl/evp.h>  // For EVP_PKEY handling
+#include <openssl/err.h>  // For error printing
+#include <openssl/ssl.h>  // Explicitly include for SSL_* functions used in msg_callback and tls_client_connect
+
+// Helper function to print hex data
+void hex_dump(const char *prefix, const unsigned char *buf, size_t len) {
+    size_t i;
+    fprintf(stderr, "%s", prefix);
+    for (i = 0; i < len; i++) {
+        fprintf(stderr, "%02x", buf[i]);
+        if ((i + 1) % 16 == 0 && (i + 1) < len) {
+            fprintf(stderr, "\n%s", prefix);
+        } else if ((i + 1) < len) {
+            fprintf(stderr, " ");
+        }
+    }
+    fprintf(stderr, "\n");
+}
+
+// Simplified info callback - mainly for state changes and alerts
+void msg_callback(const SSL *ssl, int type, int val) {
+    if (type & SSL_CB_LOOP) {
+        fprintf(stderr, "[%s] Loop: %s\n", SSL_state_string_long(ssl), SSL_state_string_long(ssl));
+    } else if (type & SSL_CB_ALERT) {
+        const char *direction = (type & SSL_CB_WRITE) ? "SEND" : "RECV";
+        const char *alert_type = (val & 0xFF00) == (SSL3_AL_FATAL << 8) ? "FATAL" : "WARNING";
+        const char *alert_desc = SSL_alert_desc_string_long(val);
+        fprintf(stderr, "[%s] %s %s Alert: %s\n",
+                SSL_state_string_long(ssl), direction, alert_type, alert_desc);
+    } else if (type & SSL_CB_EXIT) {
+        fprintf(stderr, "[%s] Exit (Result: %d)\n", SSL_state_string_long(ssl), val);
+    } else if (type & SSL_CB_HANDSHAKE_START) {
+        fprintf(stderr, "[%s] Handshake Started.\n", SSL_state_string_long(ssl));
+    } else if (type & SSL_CB_HANDSHAKE_DONE) {
+        fprintf(stderr, "[%s] Handshake Done.\n", SSL_state_string_long(ssl));
+    }
+}
+
 
 int tls_client_init(tls_client_t *client) {
     memset(client, 0, sizeof(*client));
@@ -29,6 +69,9 @@ int tls_client_init(tls_client_t *client) {
         return -1;
     }
 
+    // Register our info callback
+    SSL_CTX_set_info_callback(client->ctx, msg_callback);
+
     return 0;
 }
 
@@ -41,44 +84,18 @@ int tls_client_connect(tls_client_t *client, int sock, const char *hostname) {
         return -1;
     }
 
-/*
-✦ client->ssl 的类型是 SSL*，在 OpenSSL 库中，SSL 是一个 不透明结构体（Opaque Structure）。
-
-  这意味着：
-
-   1. 你无法直接查看或访问其内部成员： OpenSSL 库的头文件（如 ssl.h）通常不会暴露 SSL 结构体的具体定义（例如，你不会看到 struct ssl_st { ... } 这样的完整定义）。你不能像 client->ssl->some_field 这样直接访问它的内部字段。
-   2. 通过 API 函数进行交互： 所有对 SSL 对象的创建、配置、操作和查询都必须通过 OpenSSL 提供的专门的 API 函数来完成（例如 SSL_new()、SSL_set_fd()、SSL_read()、SSL_get_version() 等）。
-
-  SSL 结构体在概念上代表什么？
-
-  尽管是内部结构，但从功能上讲，一个 SSL 对象（SSL* 指向的实例）代表着一个 独立的、正在进行中的 TLS/SSL 会话。它封装了所有与这个特定会话相关的状态和信息，包括：
-
-   1. 会话状态机： 记录了当前 TLS 握手的各个阶段（例如，等待 ClientHello、发送 ServerHello、验证证书、密钥交换等）。
-   2. 协商好的协议参数：
-       * TLS/SSL 版本： 当前会话使用的 TLS 协议版本（如 TLSv1.2, TLSv1.3）。SSL_get_version() 可以获取。
-       * 密码套件（Cipher Suite）： 双方协商并选定的加密算法、哈希算法和密钥交换算法组合。SSL_get_cipher() 可以获取。
-       * 压缩方法： 如果启用了压缩，会记录使用的压缩算法（现在 TLS1.3 已移除）。
-   3. 连接引用：
-       * 上下文引用： 它会持有创建它的 SSL_CTX 对象的引用，从而继承上下文中的配置（如证书、私钥、CA 信任链、回调函数等）。
-       * 底层 I/O 引用： 它与底层的网络连接（例如通过 SSL_set_fd() 设置的文件描述符或通过 BIO 设置的 I/O 抽象层）关联，负责通过该通道发送和接收加密数据。
-   4. 会话密钥： 存储着为当前会话协商和生成的对称加密密钥、HMAC 密钥等，用于后续应用数据的加密和认证。
-   5. 证书信息： 存储了远程端（服务器或客户端）发送的证书链信息，以及本地证书信息。
-   6. 会话 ID / 会话票据（Session ID / Session Ticket）： 用于会话复用的信息，可以在后续连接中加快握手速度。
-   7. 各种标志和选项： 记录了针对这个特定会话启用的各种功能和行为选项。
-
-  所以，当你看到 client->ssl 时，你应该理解它是一个指向 OpenSSL 内部数据结构的指针，这个数据结构承载了一个 TLS 客户端会话的所有动态信息和状态。你通过调用 SSL_... 系列函数来操作和查询这个会话。
-*/
-
     // Set SNI (Server Name Indication)
     SSL_set_tlsext_host_name(client->ssl, hostname);
 
     // Set hostname for certificate verification
+    // This is important for hostname validation against the certificate
     SSL_set1_host(client->ssl, hostname);
 
     // Associate socket with SSL
     SSL_set_fd(client->ssl, sock);
 
     // Perform TLS handshake
+    fprintf(stderr, "Performing TLS handshake...\n");
     int ret = SSL_connect(client->ssl);
     if (ret != 1) {
         fprintf(stderr, "TLS handshake failed: ");
@@ -93,10 +110,11 @@ int tls_client_connect(tls_client_t *client, int sock, const char *hostname) {
                 break;
             case SSL_ERROR_SYSCALL:
                 fprintf(stderr, "I/O error\n");
+                ERR_print_errors_fp(stderr); // Print OpenSSL specific errors
                 break;
             case SSL_ERROR_SSL:
                 fprintf(stderr, "SSL protocol error\n");
-                ERR_print_errors_fp(stderr);
+                ERR_print_errors_fp(stderr); // Print OpenSSL specific errors
                 break;
             default:
                 fprintf(stderr, "Unknown error %d\n", err);
@@ -107,9 +125,72 @@ int tls_client_connect(tls_client_t *client, int sock, const char *hostname) {
         return -1;
     }
 
-    printf("TLS handshake successful\n");
-    printf("Protocol: %s\n", SSL_get_version(client->ssl));
-    printf("Cipher: %s\n", SSL_get_cipher(client->ssl));
+    fprintf(stderr, "\n--- TLS Handshake Successful ---\n");
+    fprintf(stderr, "Protocol: %s\n", SSL_get_version(client->ssl));
+    fprintf(stderr, "Cipher: %s\n", SSL_get_cipher(client->ssl));
+
+
+    // --- Extract and print cryptographic parameters ---
+
+    // 1. Client Random
+    unsigned char client_random[SSL3_RANDOM_SIZE];
+    SSL_get_client_random(client->ssl, client_random, SSL3_RANDOM_SIZE);
+    hex_dump("Client Random:  ", client_random, SSL3_RANDOM_SIZE);
+
+    // 2. Server Random
+    unsigned char server_random[SSL3_RANDOM_SIZE];
+    SSL_get_server_random(client->ssl, server_random, SSL3_RANDOM_SIZE);
+    hex_dump("Server Random:  ", server_random, SSL3_RANDOM_SIZE);
+
+    // 3. Master Secret (derived from Pre-Master Secret, Client/Server Random)
+    //    SSL_export_keying_material can be used to export various secrets.
+    //    For master_secret, we use "EXPORTER-master secret" label, but it's not strictly standard.
+    //    The master secret is stored in the SSL_SESSION.
+    //    Let's use SSL_SESSION_get_master_key.
+    unsigned char master_key[SSL_MAX_MASTER_KEY_LENGTH];
+    size_t master_key_len = SSL_SESSION_get_master_key(SSL_get_session(client->ssl), master_key, sizeof(master_key));
+    if (master_key_len > 0) {
+        hex_dump("Master Secret:  ", master_key, master_key_len);
+    } else {
+        fprintf(stderr, "Failed to get Master Secret.\n");
+    }
+
+    // 4. Server Certificate Information
+    X509 *server_cert = SSL_get_peer_certificate(client->ssl);
+    if (server_cert) {
+        fprintf(stderr, "Server Certificate:\n");
+        X509_NAME *subj = X509_get_subject_name(server_cert);
+        if (subj) {
+            char *subject_str = X509_NAME_oneline(subj, NULL, 0);
+            fprintf(stderr, "  Subject: %s\n", subject_str);
+            OPENSSL_free(subject_str);
+        }
+        X509_NAME *issuer = X509_get_issuer_name(server_cert);
+        if (issuer) {
+            char *issuer_str = X509_NAME_oneline(issuer, NULL, 0);
+            fprintf(stderr, "  Issuer:  %s\n", issuer_str);
+            OPENSSL_free(issuer_str);
+        }
+        EVP_PKEY *pubkey = X509_get0_pubkey(server_cert);
+        if (pubkey) {
+            fprintf(stderr, "  Public Key Type: %s\n", EVP_PKEY_get0_type_name(pubkey));
+            fprintf(stderr, "  Public Key Bits: %d\n", EVP_PKEY_get_bits(pubkey));
+        }
+
+        // Verify result (server certificate chain validation status)
+        long verify_result = SSL_get_verify_result(client->ssl);
+        if (verify_result == X509_V_OK) {
+            fprintf(stderr, "  Certificate Verification: OK\n");
+        } else {
+            fprintf(stderr, "  Certificate Verification: FAILED (%s)\n", X509_verify_cert_error_string(verify_result));
+        }
+
+        X509_free(server_cert); // Free the reference obtained by SSL_get_peer_certificate
+    } else {
+        fprintf(stderr, "No server certificate received.\n");
+    }
+
+    fprintf(stderr, "--------------------------------\n");
 
     return 0;
 }
